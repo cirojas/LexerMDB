@@ -1,33 +1,34 @@
 // #define XXH_STATIC_LINKING_ONLY   /* access advanced declarations */
 // #define XXH_IMPLEMENTATION   /* access definitions */
-#define XXH_INLINE_ALL
+#define XXH_INLINE_ALL  // TODO: poner en xxhash/xxhash.h ?
 #define XXH_VECTOR XXH_AVX2
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+// #include <cerrno>
 // #include <unordered_set>
 // #include <unordered_map>
-#include <thread>
+// #include <thread>
 #include <vector>
 
-#include <sys/mman.h>
+// #include <sys/mman.h>
 
 #include "bpt_leaf_writer.h"
+#include "bpt_dir_writer.h"
 #include "inliner.h"
 #include "lexer.h"
 #include "object_id.h"
-#include "state.h"
 #include "robin_hood.h"
+#include "state.h"
 #include "xxhash/xxhash.h"
 // #include "murmur3/murmur3.h"
 
 // Estados:
-constexpr int STATES = 14;
-constexpr int TOKENS = 16;
+constexpr int STATES = 14; // TODO: extraer
+constexpr int TOKENS = 16; // TODO: extraer
 int* state_transitions;
 void (*state_funcs [TOKENS*STATES])();
 Lexer lexer;
@@ -53,18 +54,18 @@ std::vector<std::array<uint64_t, 2>> labels;
 std::vector<std::array<uint64_t, 3>> properties;
 std::vector<std::array<uint64_t, 4>> edges;
 
-// char* external_strings = new char[4096*1024];
 // uint64_t external_strings_capacity = 4096*1024;
-size_t mmap_size = 1024ull*1024ull*1024ull*8ull;
-char* external_strings = (char*) mmap(
-    NULL,
-    mmap_size,
-    PROT_READ|PROT_WRITE,
-    MAP_ANON|MAP_SHARED,
-    -1,
-    0);
+size_t external_strings_initial_size = 1024ULL * 1024ULL * 1024ULL * 1ULL;
+char* external_strings = new char[external_strings_initial_size];
+// char* external_strings = (char*) mmap(
+//     NULL,
+//     mmap_size,
+//     PROT_READ|PROT_WRITE,
+//     MAP_ANON|MAP_SHARED,
+//     -1,
+//     0);
 
-uint64_t external_strings_capacity = mmap_size;
+uint64_t external_strings_capacity = external_strings_initial_size;
 uint64_t external_strings_end = 1;
 
 class ExternalString {
@@ -432,7 +433,6 @@ int get_transition(int state, int token) {
     return state_transitions[STATES*state + token];
 }
 
-// TODO: receive method
 void set_transition(int state, int token, int value, void (*func)()) {
     // auto a = &do_nothing;
     state_funcs[STATES*state + token] = func;
@@ -440,15 +440,6 @@ void set_transition(int state, int token, int value, void (*func)()) {
 }
 
 int main() {
-    // std::this_thread::sleep_for(std::chrono::milliseconds(10000));
-
-    if (external_strings == MAP_FAILED) {
-        // std::cout << "failed to reserve memory\n";
-        std::cout << "errno: " << std::strerror(errno) << "\n";
-        exit(1);
-    }
-    madvise(external_strings, external_strings_capacity, MADV_RANDOM);
-
     auto start = std::chrono::system_clock::now();
 
     ExternalString::strings = external_strings;
@@ -558,15 +549,21 @@ int main() {
         std::sort(edges.begin(), edges.end());
         auto* i = edges.data();
         auto* end = edges.end().operator->();
-        BPTLeafWriter leaf_writer("db/from_to_type_edge.dat");
+        BPTLeafWriter<4> leaf_writer("db/from_to_type_edge.dat");
+        BPTDirWriter<4> dir_writer("db/from_to_type_edge.dir");
         uint32_t current_block = 0;
         while (i < end) {
             char* begin = (char*) i;
-            i += 127; // ONLY FOR QUADS
+
+            // skip first leaf from going into bulk_import
+            if (i != edges.data()) {
+                dir_writer.bulk_insert(i, 0, current_block);
+            }
+            i += leaf_writer.max_records;
             if (i < end) {
-                leaf_writer.process_block(begin, 127, ++current_block);
+                leaf_writer.process_block(begin, leaf_writer.max_records, ++current_block);
             } else {
-                leaf_writer.process_block(begin, edges.size() % 127, 0);
+                leaf_writer.process_block(begin, edges.size() % leaf_writer.max_records, 0);
             }
         }
     }
@@ -582,15 +579,21 @@ int main() {
         std::sort(edges.begin(), edges.end());
         auto* i = edges.data();
         auto* end = edges.end().operator->();
-        BPTLeafWriter leaf_writer("db/to_type_from_edge.dat");
+        BPTLeafWriter<4> leaf_writer("db/to_type_from_edge.dat");
+        BPTDirWriter<4> dir_writer("db/to_type_from_edge.dir");
         uint32_t current_block = 0;
         while (i < end) {
             char* begin = (char*) i;
-            i += 127; // ONLY FOR QUADS
+
+            // skip first leaf from going into bulk_import
+            if (i != edges.data()) {
+                dir_writer.bulk_insert(i, 0, current_block);
+            }
+            i += leaf_writer.max_records;
             if (i < end) {
-                leaf_writer.process_block(begin, 127, ++current_block);
+                leaf_writer.process_block(begin, leaf_writer.max_records, ++current_block);
             } else {
-                leaf_writer.process_block(begin, edges.size() % 127, 0);
+                leaf_writer.process_block(begin, edges.size() % leaf_writer.max_records, 0);
             }
         }
     }
@@ -606,15 +609,21 @@ int main() {
         std::sort(edges.begin(), edges.end());
         auto* i = edges.data();
         auto* end = edges.end().operator->();
-        BPTLeafWriter leaf_writer("db/type_from_to_edge.dat");
+        BPTLeafWriter<4> leaf_writer("db/type_from_to_edge.dat");
+        BPTDirWriter<4> dir_writer("db/type_from_to_edge.dir");
         uint32_t current_block = 0;
         while (i < end) {
             char* begin = (char*) i;
-            i += 127; // ONLY FOR QUADS
+
+            // skip first leaf from going into bulk_import
+            if (i != edges.data()) {
+                dir_writer.bulk_insert(i, 0, current_block);
+            }
+            i += leaf_writer.max_records;
             if (i < end) {
-                leaf_writer.process_block(begin, 127, ++current_block);
+                leaf_writer.process_block(begin, leaf_writer.max_records, ++current_block);
             } else {
-                leaf_writer.process_block(begin, edges.size() % 127, 0);
+                leaf_writer.process_block(begin, edges.size() % leaf_writer.max_records, 0);
             }
         }
     }

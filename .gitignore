@@ -1,3 +1,6 @@
-db/*.dat
+db/*
 a.out
 test.txt
+TODO
+release
+debug
