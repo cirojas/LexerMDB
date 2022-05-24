@@ -279,7 +279,7 @@ void save_prop_key() {
 // void save_first_id() { id1 = lexer.str; }
 
 void save_second_id_identifier() {
-    if (lexer.str_len) {
+    if (lexer.str_len < 8) {
         id2 = Inliner::inline_string(lexer.str) | ObjectId::IDENTIFIABLE_INLINED_MASK ;
     } else {
         id2 = get_or_create_external_string_id() | ObjectId::IDENTIFIABLE_EXTERNAL_MASK;
