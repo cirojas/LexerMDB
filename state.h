@@ -41,5 +41,7 @@ enum State {
     EXPECT_EDGE_PROP_COLON = 12,
 
     //
-    EXPECT_EDGE_PROP_VALUE = 13
+    EXPECT_EDGE_PROP_VALUE = 13,
+
+    TOTAL_STATES = 14
 };

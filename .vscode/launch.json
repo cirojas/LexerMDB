@@ -9,6 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/debug",
+            // "args": ["<", "test.txt"],
             "args": ["<", "../MillenniumDB-Dev/tests/dbs/example-db.txt"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

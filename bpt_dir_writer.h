@@ -6,6 +6,7 @@
 #include <fstream>
 #include <cstring>
 #include <ios>
+#include <iostream>
 
 /*
 Idea: tener todas las páginas del BPT en memoria a la vez
@@ -43,8 +44,11 @@ public:
     static constexpr auto max_records = (page_size - 2*sizeof(int32_t) )
                                          / (sizeof(uint64_t)*N + sizeof(int32_t));
 
-    BPTDirWriter(const char* filename) {
+    BPTDirWriter(const std::string& filename) {
         file.open(filename, std::ios::out|std::ios::binary);
+        if (file.fail()) {
+            std::cout << "Error opening file " << filename << std::endl;
+        }
         auto root = new char[page_size];
         memset(root, 0, page_size);
         pages.push_back(root);

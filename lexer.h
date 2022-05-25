@@ -1,6 +1,7 @@
 #pragma once
 
 enum Token {
+  // must skip 0, it represents there are no more tokens
   COLON        = 1,
   L_ARROW      = 2,
   R_ARROW      = 3,
@@ -15,7 +16,8 @@ enum Token {
   FLOAT        = 12,
   WHITESPACE   = 13,
   ENDLINE      = 14,
-  UNRECOGNIZED = 15
+  UNRECOGNIZED = 15,
+  TOTAL_TOKENS = 16
 };
 
 class Lexer {
