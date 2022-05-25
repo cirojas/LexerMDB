@@ -29,8 +29,9 @@ int current_line = 1;
 
 uint64_t id1;
 uint64_t id2;
-uint64_t edge_id = 0;
-// uint64_t anon_id = 0;
+uint64_t edge_id;
+uint64_t edge_count = 0;
+std::vector<uint64_t> ids_stack;
 
 uint64_t type_id;
 uint64_t key_id;
@@ -188,6 +189,7 @@ void set_left_direction() { direction = false; }
 void set_right_direction() { direction = true; }
 
 void save_first_id_identifier() {
+    ids_stack.clear();
     if (lexer.str_len < 8) {
         id1 = Inliner::inline_string(lexer.str) | ObjectId::IDENTIFIABLE_INLINED_MASK ;
     } else {
@@ -196,11 +198,13 @@ void save_first_id_identifier() {
 }
 
 void save_first_id_anon() {
+    ids_stack.clear();
     uint64_t unmasked_id = std::stoull(lexer.str + 2);
     id1 = unmasked_id | ObjectId::ANONYMOUS_NODE_MASK;
 }
 
 void save_first_id_string() {
+    ids_stack.clear();
     normalize_string_literal();
 
     if (lexer.str_len < 8) {
@@ -211,27 +215,49 @@ void save_first_id_string() {
 }
 
 void save_first_id_iri() {
+    ids_stack.clear();
     //TODO:
 }
 
 void save_first_id_int() {
+    ids_stack.clear();
     id1 = Inliner::inline_int(atoll(lexer.str));
 }
 
 void save_first_id_float() {
+    ids_stack.clear();
     id1 = Inliner::inline_float(atof(lexer.str));
 }
 
 void save_first_id_true() {
+    ids_stack.clear();
     id1 = ObjectId::VALUE_BOOL_MASK | 0x01;
 }
 
 void save_first_id_false() {
+    ids_stack.clear();
     id1 = ObjectId::VALUE_BOOL_MASK | 0x00;
 }
 
 void save_first_id_implicit() {
     // TODO:
+    if (ids_stack.size() == 0) {
+        // throw ImportException("[line " + std::to_string(line_number)
+            // + "] can't use implicit edge on undefined object");
+    }
+    else if (lexer.str_len < ids_stack.size()) {
+        id1 = ids_stack[lexer.str_len-1];
+        ids_stack.resize(lexer.str_len);
+        ids_stack.push_back(edge_id);
+    }
+    else if (lexer.str_len == ids_stack.size()) {
+        id1 = ids_stack[lexer.str_len-1];
+        ids_stack.push_back(edge_id);
+    }
+    else {
+        // throw ImportException("[line " + std::to_string(line_number)
+        //     + "] undefined level of implicit edge");
+    }
 }
 
 void save_edge_type() {
@@ -240,34 +266,36 @@ void save_edge_type() {
     } else {
         type_id = get_or_create_external_string_id() | ObjectId::IDENTIFIABLE_EXTERNAL_MASK;
     }
-    edge_id++;
+    edge_id = edge_count++ | ObjectId::CONNECTION_MASK;
     if (direction) {
-        edges.push_back({id1, id2, type_id, edge_id | ObjectId::CONNECTION_MASK});
+        edges.push_back({id1, id2, type_id, edge_id});
     } else {
-        edges.push_back({id2, id1, type_id, edge_id | ObjectId::CONNECTION_MASK});
+        edges.push_back({id2, id1, type_id, edge_id});
     }
 
     if (id1 == id2) {
-        equal_from_to.push_back({id1, type_id, edge_id | ObjectId::CONNECTION_MASK});
+        equal_from_to.push_back({id1, type_id, edge_id});
 
         if (id1 == type_id) {
-            equal_from_to_type.push_back({id1, edge_id | ObjectId::CONNECTION_MASK});
+            equal_from_to_type.push_back({id1, edge_id});
         }
     }
     if (id1 == type_id) {
         if (direction) {
-            equal_from_type.push_back({id1, id2, edge_id | ObjectId::CONNECTION_MASK});
+            equal_from_type.push_back({id1, id2, edge_id});
         } else {
-            equal_to_type.push_back({id1, id2, edge_id | ObjectId::CONNECTION_MASK});
+            equal_to_type.push_back({id1, id2, edge_id});
         }
     }
     if (id2 == type_id) {
         if (direction) {
-            equal_to_type.push_back({id1, id2, edge_id | ObjectId::CONNECTION_MASK});
+            equal_to_type.push_back({id1, id2, edge_id});
         } else {
-            equal_from_type.push_back({id1, id2, edge_id | ObjectId::CONNECTION_MASK});
+            equal_from_type.push_back({id1, id2, edge_id});
         }
     }
+
+    ids_stack.push_back(edge_id);
 }
 
 void save_prop_key() {
@@ -404,6 +432,7 @@ void finish_wrong_line() {
 
 void finish_node_line() {
     declared_nodes.push_back({id1});
+    ids_stack.push_back(id1);
     current_line++;
 }
 
