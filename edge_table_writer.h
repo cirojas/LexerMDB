@@ -26,8 +26,8 @@ public:
     }
 
     void insert_tuple(const std::array<uint64_t, 4>& edge) {
+        auto records = reinterpret_cast<uint64_t*>(buffer);
         if (*record_count < max_records) {
-            auto records = reinterpret_cast<uint64_t*>(buffer);
             records[ (*record_count)*3 ]     = edge[0];
             records[ (*record_count)*3 + 1 ] = edge[1];
             records[ (*record_count)*3 + 2 ] = edge[2];
@@ -35,7 +35,10 @@ public:
         } else {
             file.write(buffer, page_size);
             memset(buffer, 0, page_size); // TODO: innecesary?
-            (*record_count) = 0;
+            records[0] = edge[0];
+            records[1] = edge[1];
+            records[2] = edge[2];
+            (*record_count) = 1;
         }
     }
 
