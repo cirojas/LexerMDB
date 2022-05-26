@@ -14,6 +14,7 @@
 
 #include "bpt_leaf_writer.h"
 #include "bpt_dir_writer.h"
+#include "edge_table_writer.h"
 #include "inliner.h"
 #include "lexer.h"
 #include "object_id.h"
@@ -165,24 +166,23 @@ void normalize_string_literal() {
     *write_ptr = '\0';
 }
 
-const char* decode_id(uint64_t id) {
-    auto type_mask = id & ObjectId::TYPE_MASK;
-    auto value_mask = id & ObjectId::VALUE_MASK;
-
-    if (type_mask == ObjectId::IDENTIFIABLE_EXTERNAL_MASK) {
-        return &external_strings[value_mask];
-    } else {
-        char* c = new char[8];
-        int shift_size = 6*8;
-        for (int i = 0; i < ObjectId::MAX_INLINED_BYTES; i++) {
-            uint8_t byte = (id >> shift_size) & 0xFF;
-            c[i] = byte;
-            shift_size -= 8;
-        }
-        c[7] = '\0';
-        return c;
-    }
-}
+// const char* decode_id(uint64_t id) {
+//     auto type_mask = id & ObjectId::TYPE_MASK;
+//     auto value_mask = id & ObjectId::VALUE_MASK;
+//     if (type_mask == ObjectId::IDENTIFIABLE_EXTERNAL_MASK) {
+//         return &external_strings[value_mask];
+//     } else {
+//         char* c = new char[8];
+//         int shift_size = 6*8;
+//         for (int i = 0; i < ObjectId::MAX_INLINED_BYTES; i++) {
+//             uint8_t byte = (id >> shift_size) & 0xFF;
+//             c[i] = byte;
+//             shift_size -= 8;
+//         }
+//         c[7] = '\0';
+//         return c;
+//     }
+// }
 
 void do_nothing() { }
 void set_left_direction() { direction = false; }
@@ -266,7 +266,7 @@ void save_edge_type() {
     } else {
         type_id = get_or_create_external_string_id() | ObjectId::IDENTIFIABLE_EXTERNAL_MASK;
     }
-    edge_id = edge_count++ | ObjectId::CONNECTION_MASK;
+    edge_id = ++edge_count | ObjectId::CONNECTION_MASK;
     if (direction) {
         edges.push_back({id1, id2, type_id, edge_id});
     } else {
@@ -556,6 +556,10 @@ void create_bpt(const std::string& base_name, std::vector<std::array<uint64_t, N
     auto* end = values.end().operator->();
     uint32_t current_block = 0;
 
+    if (values.size() == 0) {
+        leaf_writer.make_empty();
+    }
+
     while (i < end) {
         char* begin = (char*) i;
 
@@ -565,11 +569,18 @@ void create_bpt(const std::string& base_name, std::vector<std::array<uint64_t, N
         }
         i += leaf_writer.max_records;
         if (i < end) {
-            leaf_writer.process_block(begin, leaf_writer.max_records, current_block);
-            current_block++;
+            leaf_writer.process_block(begin, leaf_writer.max_records, ++current_block);
         } else {
             leaf_writer.process_block(begin, values.size() % leaf_writer.max_records, 0);
         }
+    }
+}
+
+void create_table(const std::string& base_name) {
+    EdgeTableWriter table_writer(base_name + ".table");
+
+    for (const auto& edge : edges) {
+        table_writer.insert_tuple(edge);
     }
 }
 
@@ -690,7 +701,7 @@ int main() {
             declared_nodes_set.insert(n[0]);
         }
 
-        for (auto edge : edges) {
+        for (const auto& edge : edges) {
             if (declared_nodes_set.insert(edge[0]).second) {
                 declared_nodes.push_back({edge[0]});
             }
@@ -722,6 +733,9 @@ int main() {
         reorder_cols(properties, current_prop, { COL_KEY, COL_VALUE, COL_OBJ });
         create_bpt("db/key_value_obj", properties);
     }
+
+    // Must write edge table before ordering
+    create_table("db/edges");
 
     {
         size_t COL_FROM = 0, COL_TO = 1, COL_TYPE = 2, COL_EDGE = 3;
