@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "catalog/quad_catalog.h"
 #include "bpt_leaf_writer.h"
 #include "bpt_dir_writer.h"
 #include "edge_table_writer.h"
@@ -39,6 +40,8 @@ uint64_t key_id;
 
 // true if right
 bool direction;
+
+QuadCatalog catalog("db/catalog.dat");
 
 std::vector<std::array<uint64_t, 1>> declared_nodes;
 std::vector<std::array<uint64_t, 2>> labels;
@@ -201,6 +204,9 @@ void save_first_id_anon() {
     ids_stack.clear();
     uint64_t unmasked_id = std::stoull(lexer.str + 2);
     id1 = unmasked_id | ObjectId::ANONYMOUS_NODE_MASK;
+    if (unmasked_id > catalog.anonymous_nodes_count) {
+        catalog.anonymous_nodes_count = unmasked_id;
+    }
 }
 
 void save_first_id_string() {
@@ -266,6 +272,8 @@ void save_edge_type() {
     } else {
         type_id = get_or_create_external_string_id() | ObjectId::IDENTIFIABLE_EXTERNAL_MASK;
     }
+    ++catalog.type2total_count[type_id];
+
     edge_id = ++edge_count | ObjectId::CONNECTION_MASK;
     if (direction) {
         edges.push_back({id1, id2, type_id, edge_id});
@@ -318,6 +326,9 @@ void save_second_id_anon() {
     // delete first 2 characters: '_a'
     uint64_t unmasked_id = std::stoull(lexer.str + 2);
     id2 = unmasked_id | ObjectId::ANONYMOUS_NODE_MASK;
+    if (unmasked_id > catalog.anonymous_nodes_count) {
+        catalog.anonymous_nodes_count = unmasked_id;
+    }
 }
 
 void save_second_id_string() {
@@ -358,6 +369,7 @@ void add_node_label() {
         label_id = get_or_create_external_string_id() | ObjectId::VALUE_EXTERNAL_STR_MASK;
     }
     labels.push_back({id1, label_id});
+    ++catalog.label2total_count[label_id];
 }
 
 void add_node_prop_string() {
@@ -588,6 +600,7 @@ int main() {
     auto start = std::chrono::system_clock::now();
 
     ExternalString::strings = external_strings;
+    catalog.anonymous_nodes_count = 0;
 
     state_transitions = new int[Token::TOTAL_TOKENS*State::TOTAL_STATES];
 
@@ -677,10 +690,6 @@ int main() {
         current_state = get_transition(current_state, token);
     }
 
-    std::cout << "label count: " << labels.size() << "\n";
-    std::cout << "property count: " << properties.size() << "\n";
-    std::cout << "edge count: " << edges.size() << "\n";
-
     auto end_lexer = std::chrono::system_clock::now();
     std::chrono::duration<float, std::milli> parser_duration = end_lexer - start;
     std::cout << "Parser duration: " << parser_duration.count() << " ms\n";
@@ -734,6 +743,51 @@ int main() {
         create_bpt("db/key_value_obj", properties);
     }
 
+    // 
+    {
+        // TODO: use robin hood unordered map
+        std::map<uint64_t, uint64_t> map_key_count;
+        std::map<uint64_t, uint64_t> map_distinct_values;
+        uint64_t current_key     = 0;
+        uint64_t current_value   = 0;
+        uint64_t key_count       = 0;
+        uint64_t distinct_values = 0;
+
+        // properties_ordered_file.begin_read();
+        // auto record = properties_ordered_file.next_record();
+        for (const auto& record : properties) {
+            // check same key
+            if (record[0] == current_key) {
+                ++key_count;
+                // check if value changed
+                if (record[1] != current_value) {
+                    ++distinct_values;
+                    current_value = record[1];
+                }
+            } else {
+                // save stats from last key
+                if (current_key != 0) {
+                    map_key_count.insert({ current_key, key_count });
+                    map_distinct_values.insert({ current_key, distinct_values });
+                }
+                current_key   = record[0];
+                current_value = record[1];
+
+                key_count       = 1;
+                distinct_values = 1;
+            }
+        }
+        // save stats from last key
+        if (current_key != 0) {
+            map_key_count.insert({ current_key, key_count });
+            map_distinct_values.insert({ current_key, distinct_values });
+        }
+
+        catalog.key2distinct    = move(map_distinct_values);
+        catalog.key2total_count = move(map_key_count);
+        catalog.distinct_keys   = catalog.key2total_count.size();
+    }
+
     // Must write edge table before ordering
     create_table("db/edges");
 
@@ -744,8 +798,34 @@ int main() {
         reorder_cols(edges, current_edge, { COL_FROM, COL_TO, COL_TYPE, COL_EDGE });
         create_bpt("db/from_to_type_edge", edges);
 
+        { // set catalog.distinct_from
+            uint64_t distinct_from = 0;
+            uint64_t current_from  = 0;
+
+            for (const auto& record : edges) {
+                if (record[0] != current_from) {
+                    ++distinct_from;
+                    current_from = record[0];
+                }
+            }
+            catalog.distinct_from = distinct_from;
+        }
+
         reorder_cols(edges, current_edge, { COL_TO, COL_TYPE, COL_FROM, COL_EDGE });
         create_bpt("db/to_type_from_edge", edges);
+
+        { // set catalog.distinct_to
+            uint64_t distinct_to = 0;
+            uint64_t current_from  = 0;
+
+            for (const auto& record : edges) {
+                if (record[0] != current_from) {
+                    ++distinct_to;
+                    current_from = record[0];
+                }
+            }
+            catalog.distinct_to = distinct_to;
+        }
 
         reorder_cols(edges, current_edge, { COL_TYPE, COL_FROM, COL_TO, COL_EDGE });
         create_bpt("db/type_from_to_edge", edges);
@@ -760,6 +840,29 @@ int main() {
 
         reorder_cols(equal_from_to_type, current_edge, { COL_FROM_TO_TYPE, COL_EDGE });
         create_bpt("db/equal_from_to_type", equal_from_to_type);
+
+        {
+            // create catalog.type2equal_from_to_type_count
+            uint64_t current_type = 0;
+            uint64_t count        = 0;
+            for (const auto& record : equal_from_to_type) {
+                // check same key
+                if (record[0] == current_type) {
+                    ++count;
+                } else {
+                    // save stats from last key
+                    if (current_type != 0) {
+                        catalog.type2equal_from_to_type_count.insert({ current_type, count });
+                    }
+                    current_type = record[0];
+                    count = 1;
+                }
+            }
+            // save stats from last key
+            if (current_type != 0) {
+                catalog.type2equal_from_to_type_count.insert({ current_type, count });
+            }
+        }
     }
 
     {   // FROM=TO TYPE EDGE
@@ -771,6 +874,30 @@ int main() {
 
         reorder_cols(equal_from_to, current_edge, { COL_TYPE, COL_FROM_TO, COL_EDGE });
         create_bpt("db/equal_from_to_inverted", equal_from_to);
+
+        {
+            // create catalog.type2equal_from_to_count
+            // calling this AFTER inverted, so type is at pos 0
+            uint64_t current_type = 0;
+            uint64_t count        = 0;
+            for (const auto& record : equal_from_to) {
+                // check same key
+                if (record[0] == current_type) {
+                    ++count;
+                } else {
+                    // save stats from last key
+                    if (current_type != 0) {
+                        catalog.type2equal_from_to_count.insert({ current_type, count });
+                    }
+                    current_type = record[0];
+                    count = 1;
+                }
+            }
+            // save stats from last key
+            if (current_type != 0) {
+                catalog.type2equal_from_to_count.insert({ current_type, count });
+            }
+        }
     }
 
     {   // FROM=TYPE TO EDGE
@@ -779,6 +906,30 @@ int main() {
 
         reorder_cols(equal_from_type, current_edge, { COL_FROM_TYPE, COL_TO, COL_EDGE });
         create_bpt("db/equal_from_type", equal_from_type);
+
+        {
+            // create catalog.type2equal_from_type_count
+            // calling this BEFORE inverted, so type is at pos 0
+            uint64_t current_type = 0;
+            uint64_t count        = 0;
+            for (const auto& record : equal_from_type) {
+                // check same key
+                if (record[0] == current_type) {
+                    ++count;
+                } else {
+                    // save stats from last key
+                    if (current_type != 0) {
+                        catalog.type2equal_from_type_count.insert({ current_type, count });
+                    }
+                    current_type = record[0];
+                    count = 1;
+                }
+            }
+            // save stats from last key
+            if (current_type != 0) {
+                catalog.type2equal_from_type_count.insert({ current_type, count });
+            }
+        }
 
         reorder_cols(equal_from_type, current_edge, { COL_TO, COL_FROM_TYPE, COL_EDGE });
         create_bpt("db/equal_from_type_inverted", equal_from_type);
@@ -791,6 +942,30 @@ int main() {
         reorder_cols(equal_to_type, current_edge, { COL_TO_TYPE, COL_FROM, COL_EDGE });
         create_bpt("db/equal_to_type", equal_to_type);
 
+        {
+            // create catalog.type2equal_to_type_count
+            // calling this BEFORE inverted, so type is at pos 0
+            uint64_t current_type = 0;
+            uint64_t count        = 0;
+            for (const auto& record : equal_from_to) {
+                // check same key
+                if (record[0] == current_type) {
+                    ++count;
+                } else {
+                    // save stats from last key
+                    if (current_type != 0) {
+                        catalog.type2equal_to_type_count.insert({ current_type, count });
+                    }
+                    current_type = record[0];
+                    count = 1;
+                }
+            }
+            // save stats from last key
+            if (current_type != 0) {
+                catalog.type2equal_to_type_count.insert({ current_type, count });
+            }
+        }
+
         reorder_cols(equal_to_type, current_edge, { COL_FROM, COL_TO_TYPE, COL_EDGE });
         create_bpt("db/equal_to_type_inverted", equal_to_type);
     }
@@ -798,5 +973,44 @@ int main() {
     auto end_order = std::chrono::system_clock::now();
     std::chrono::duration<float, std::milli> order_duration = end_order - end_lexer;
     std::cout << "Order duration: " << order_duration.count() << " ms\n";
+
+    // TODO:
+    // catalog.identifiable_nodes_count // TODO: se deberia renombrar a named_nodes count
+    // - puedo hacer merge entre bpt nodes y from_to_type_edge (liminando duplicados)
+
+    {
+        robin_hood::unordered_set<uint64_t> identifiable_nodes;
+        for (const auto& edge : edges) {
+            for (size_t i = 0; i < 3; i++) {
+                if ((edge[i] & ObjectId::TYPE_MASK) == ObjectId::IDENTIFIABLE_EXTERNAL_MASK
+                    || (edge[i] & ObjectId::TYPE_MASK) == ObjectId::IDENTIFIABLE_INLINED_MASK)
+                {
+                    identifiable_nodes.insert(edge[i]);
+                }
+            }
+        }
+        for (auto n : declared_nodes) {
+            if ((n[0] & ObjectId::TYPE_MASK) == ObjectId::IDENTIFIABLE_EXTERNAL_MASK
+                || (n[0] & ObjectId::TYPE_MASK) == ObjectId::IDENTIFIABLE_INLINED_MASK)
+            {
+                identifiable_nodes.insert(n[0]);
+            }
+        }
+        catalog.identifiable_nodes_count = identifiable_nodes.size();
+    }
+
+    catalog.distinct_type = catalog.type2total_count.size(); // TODO: may be redundant
+    catalog.distinct_labels = catalog.label2total_count.size(); // TODO: may be redundant
+    catalog.connections_count = edges.size();
+    catalog.label_count = labels.size();
+    catalog.properties_count = properties.size();
+
+    catalog.equal_from_to_count = equal_from_to.size();
+    catalog.equal_from_type_count = equal_from_type.size();
+    catalog.equal_to_type_count = equal_to_type.size();
+    catalog.equal_from_to_type_count = equal_from_to_type.size();
+
+    catalog.print();
+    catalog.save_changes();
 }
 

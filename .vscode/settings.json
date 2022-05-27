@@ -52,6 +52,7 @@
         "cstring": "cpp",
         "unordered_set": "cpp",
         "thread": "cpp",
-        "cerrno": "cpp"
+        "cerrno": "cpp",
+        "map": "cpp"
     }
 }
