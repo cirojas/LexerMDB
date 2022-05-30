@@ -12,6 +12,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include <sys/mman.h>
+
 #include "catalog/quad_catalog.h"
 #include "bpt_leaf_writer.h"
 #include "bpt_dir_writer.h"
@@ -53,7 +55,8 @@ std::vector<std::array<uint64_t, 3>> equal_to_type;
 std::vector<std::array<uint64_t, 2>> equal_from_to_type;
 
 size_t external_strings_initial_size = 1024ULL * 1024ULL * 1024ULL * 10ULL;
-char* external_strings = new char[external_strings_initial_size];
+char* external_strings;
+// char* external_strings = new char[external_strings_initial_size];
 
 uint64_t external_strings_capacity = external_strings_initial_size;
 uint64_t external_strings_end = 1;
@@ -82,14 +85,18 @@ struct ExternalStringHasher {
 void check_external_string_size() {
     while (external_strings_end + lexer.str_len + 1 >= external_strings_capacity) {
         // duplicate buffer
-        char* new_external_strings = new char[external_strings_capacity*2];
+        // char* new_external_strings = new char[external_strings_capacity*2];
+        char* new_external_strings = (char*)mmap(NULL, external_strings_initial_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        madvise(external_strings, external_strings_initial_size, MADV_HUGEPAGE);
+        madvise(external_strings, external_strings_initial_size, MADV_DONTFORK);
         std::memcpy(new_external_strings,
                     external_strings,
                     external_strings_capacity);
 
         external_strings_capacity *= 2;
 
-        delete[] external_strings;
+        // delete[] external_strings;
+        munmap(external_strings, external_strings_capacity);
         external_strings = new_external_strings;
         ExternalString::strings = external_strings;
     }
@@ -599,6 +606,10 @@ void create_table(const std::string& base_name) {
 int main() {
     auto start = std::chrono::system_clock::now();
 
+    external_strings = (char*)mmap(NULL, external_strings_initial_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    madvise(external_strings, external_strings_initial_size, MADV_HUGEPAGE);
+    madvise(external_strings, external_strings_initial_size, MADV_DONTFORK);
+
     ExternalString::strings = external_strings;
     catalog.anonymous_nodes_count = 0;
 
@@ -699,7 +710,8 @@ int main() {
         std::fstream object_file;
         object_file.open("db/object_file.dat", std::ios::out|std::ios::binary);
         object_file.write(external_strings, external_strings_end);
-        delete[] external_strings;
+        // delete[] external_strings;
+        munmap(external_strings, external_strings_capacity);
     }
 
     {   // NODES
@@ -743,9 +755,8 @@ int main() {
         create_bpt("db/key_value_obj", properties);
     }
 
-    // 
     {
-        // TODO: use robin hood unordered map
+        // TODO: use robin hood unordered map in catalog
         std::map<uint64_t, uint64_t> map_key_count;
         std::map<uint64_t, uint64_t> map_distinct_values;
         uint64_t current_key     = 0;
@@ -974,10 +985,8 @@ int main() {
     std::chrono::duration<float, std::milli> order_duration = end_order - end_lexer;
     std::cout << "Order duration: " << order_duration.count() << " ms\n";
 
-    // TODO:
-    // catalog.identifiable_nodes_count // TODO: se deberia renombrar a named_nodes count
-    // - puedo hacer merge entre bpt nodes y from_to_type_edge (liminando duplicados)
-
+    // TODO: catalog.identifiable_nodes_count se deberia renombrar a named_nodes count
+    // - puedo hacer merge entre bpt nodes y from_to_type_edge (eliminando duplicados)
     {
         robin_hood::unordered_set<uint64_t> identifiable_nodes;
         for (const auto& edge : edges) {
@@ -999,8 +1008,8 @@ int main() {
         catalog.identifiable_nodes_count = identifiable_nodes.size();
     }
 
-    catalog.distinct_type = catalog.type2total_count.size(); // TODO: may be redundant
-    catalog.distinct_labels = catalog.label2total_count.size(); // TODO: may be redundant
+    catalog.distinct_type = catalog.type2total_count.size(); // TODO: redundant
+    catalog.distinct_labels = catalog.label2total_count.size(); // TODO: redundant
     catalog.connections_count = edges.size();
     catalog.label_count = labels.size();
     catalog.properties_count = properties.size();
@@ -1012,5 +1021,7 @@ int main() {
 
     catalog.print();
     catalog.save_changes();
+
+    // TODO: save object_file_hash
 }
 
