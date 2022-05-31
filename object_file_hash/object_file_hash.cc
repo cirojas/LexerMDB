@@ -39,11 +39,13 @@ ObjectFileHash::~ObjectFileHash() {
         uint32_t tmp = dir[i];
         dir_file.write(reinterpret_cast<const char*>(&tmp), sizeof(tmp));
     }
+    delete[](dir);
     dir_file.close();
 
     buckets_file.seekg(0, buckets_file.beg);
     for (auto page : pages) {
         buckets_file.write(page, 4096);
+        delete[](page);
     }
     buckets_file.close();
 }
