@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "catalog/quad_catalog.h"
+#include "object_file_hash/object_file_hash.h"
 #include "bpt_leaf_writer.h"
 #include "bpt_dir_writer.h"
 #include "edge_table_writer.h"
@@ -699,6 +700,16 @@ int main() {
         std::fstream object_file;
         object_file.open("db/object_file.dat", std::ios::out|std::ios::binary);
         object_file.write(external_strings, external_strings_end);
+
+        ObjectFileHash object_file_hash("db/str_hash");
+
+        size_t current_offset = 1;
+        while (current_offset < external_strings_end) {
+            auto current_str = external_strings + current_offset;
+            object_file_hash.create_id(current_str, current_offset);
+            current_offset += strlen(current_str) + 1;
+        }
+
         delete[] external_strings;
     }
 
