@@ -75,7 +75,6 @@ void ObjectFileHash::duplicate_dirs() {
         ObjectFileHashBucket bucket(new_page);
         // *bucket.key_count = 0;
         // *bucket.local_depth = DEFAULT_GLOBAL_DEPTH;
-        dir[i] = i;
     }
 }
 
@@ -116,7 +115,7 @@ void ObjectFileHash::create_id(const char* str, uint64_t id) {
                 // assert(*bucket.key_count + *new_bucket.key_count == ObjectFileHashBucket::MAX_KEYS
                 //     && "EXTENDIBLE HASH INCONSISTENCY: sum of keys must be MAX_KEYS after a split");
                 if (*bucket.key_count + *new_bucket.key_count != ObjectFileHashBucket::MAX_KEYS) {
-                    std::cout << (int)*bucket.key_count << '+' << (int)*new_bucket.key_count << '=' << (*bucket.key_count + *new_bucket.key_count) << std::endl;
+                    std::cout << "A"  << (int)*bucket.key_count << '+' << (int)*new_bucket.key_count << '=' << (*bucket.key_count + *new_bucket.key_count) << std::endl;
                 }
 
             } else {
@@ -143,8 +142,9 @@ void ObjectFileHash::create_id(const char* str, uint64_t id) {
                 // assert(*bucket.key_count + *new_bucket.key_count == ObjectFileHashBucket::MAX_KEYS
                 //     && "EXTENDIBLE HASH INCONSISTENCY: sum of keys must be MAX_KEYS after a split");
                 if (*bucket.key_count + *new_bucket.key_count != ObjectFileHashBucket::MAX_KEYS) {
-                    std::cout << (int)*bucket.key_count << '+' << (int)*new_bucket.key_count << '=' << (*bucket.key_count + *new_bucket.key_count) << std::endl;
-                }            }
+                    std::cout << "B" << (int)*bucket.key_count << '+' << (int)*new_bucket.key_count << '=' << (*bucket.key_count + *new_bucket.key_count) << std::endl;
+                }
+            }
         } else {
             return;
         }
