@@ -8,7 +8,7 @@
 
 class ObjectFileHash {
 public:
-    static constexpr auto DEFAULT_GLOBAL_DEPTH = 4;
+    static constexpr auto DEFAULT_GLOBAL_DEPTH = 8;
 
     ObjectFileHash(const std::string& filename);
     ~ObjectFileHash();
