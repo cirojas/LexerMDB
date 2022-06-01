@@ -13,7 +13,6 @@
 ObjectFileHash::ObjectFileHash(const std::string& filename) {
     dir_file.open(filename + ".dir", std::ios::out|std::ios::binary);
     buckets_file.open(filename + ".dat", std::ios::out|std::ios::binary);
-    dir_file.seekg(0, dir_file.end);
 
     global_depth = DEFAULT_GLOBAL_DEPTH;
     uint_fast32_t dir_size = 1 << global_depth;
@@ -32,6 +31,7 @@ ObjectFileHash::ObjectFileHash(const std::string& filename) {
 
 ObjectFileHash::~ObjectFileHash() {
     dir_file.seekg(0, dir_file.beg);
+    buckets_file.seekg(0, buckets_file.beg);
 
     dir_file.write(reinterpret_cast<const char*>(&global_depth), sizeof(uint8_t));
     uint_fast32_t dir_size = 1 << global_depth;
@@ -42,7 +42,6 @@ ObjectFileHash::~ObjectFileHash() {
     delete[](dir);
     dir_file.close();
 
-    buckets_file.seekg(0, buckets_file.beg);
     for (auto page : pages) {
         buckets_file.write(page, 4096);
         delete[](page);
@@ -67,13 +66,6 @@ void ObjectFileHash::duplicate_dirs() {
 
     delete[](dir);
     dir = new_dir;
-
-    // for (uint_fast32_t i = old_dir_size; i < new_dir_size; ++i) {
-    //     auto new_page = new char[4096];
-    //     memset(new_page, 0, 4096);
-    //     pages.push_back(new_page);
-    //     ObjectFileHashBucket bucket(new_page);
-    // }
 }
 
 
@@ -86,11 +78,10 @@ void ObjectFileHash::create_id(const char* str, uint64_t id) {
         // global_depth must be <= 64
         auto mask = 0xFFFF'FFFF'FFFF'FFFF >> (64 - global_depth);
         auto suffix = hash[0] & mask;
-        // auto bucket_number = dir[suffix]; // TODO: no usar bucket_number? sino suffix
         ObjectFileHashBucket bucket(pages[dir[suffix]]);
 
         bool need_split;
-        bucket.create_id(id, hash[0], hash[1], &need_split);
+        bucket.create_id(id, hash[0], &need_split);
 
         if (need_split) {
             auto new_page = new char[4096];
@@ -119,12 +110,12 @@ void ObjectFileHash::create_id(const char* str, uint64_t id) {
 
                 // assert(*bucket.key_count + *new_bucket.key_count == ObjectFileHashBucket::MAX_KEYS
                 //     && "EXTENDIBLE HASH INCONSISTENCY: sum of keys must be MAX_KEYS after a split");
-                // if (*bucket.key_count + *new_bucket.key_count != ObjectFileHashBucket::MAX_KEYS) {
-                //     std::cout << "A"  << (int)*bucket.key_count << '+' << (int)*new_bucket.key_count << '=' << (*bucket.key_count + *new_bucket.key_count) << std::endl;
-                // }
+                if (*bucket.key_count + *new_bucket.key_count != ObjectFileHashBucket::MAX_KEYS) {
+                    std::cout << "A"  << (int)*bucket.key_count << '+' << (int)*new_bucket.key_count << '=' << (*bucket.key_count + *new_bucket.key_count) << std::endl;
+                }
 
             } else {
-                // assert(*bucket.local_depth == global_depth && "EXTENDIBLE HASH INCONSISTENCY: *bucket.local_depth != global_depth");
+                assert(*bucket.local_depth == global_depth && "EXTENDIBLE HASH INCONSISTENCY: *bucket.local_depth != global_depth");
                 ++(*bucket.local_depth);
 
                 auto new_suffix = (1 << global_depth) | suffix; // 1|suffix
@@ -140,9 +131,9 @@ void ObjectFileHash::create_id(const char* str, uint64_t id) {
 
                 // assert(*bucket.key_count + *new_bucket.key_count == ObjectFileHashBucket::MAX_KEYS
                 //     && "EXTENDIBLE HASH INCONSISTENCY: sum of keys must be MAX_KEYS after a split");
-                // if (*bucket.key_count + *new_bucket.key_count != ObjectFileHashBucket::MAX_KEYS) {
-                //     std::cout << "B" << (int)*bucket.key_count << '+' << (int)*new_bucket.key_count << '=' << (*bucket.key_count + *new_bucket.key_count) << std::endl;
-                // }
+                if (*bucket.key_count + *new_bucket.key_count != ObjectFileHashBucket::MAX_KEYS) {
+                    std::cout << "B" << (int)*bucket.key_count << '+' << (int)*new_bucket.key_count << '=' << (*bucket.key_count + *new_bucket.key_count) << std::endl;
+                }
             }
         } else {
             return;
