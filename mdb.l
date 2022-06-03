@@ -14,7 +14,7 @@ IDENTIFIER    [a-zA-Z][a-zA-Z0-9_]*
 IRI           <([^><\"{}\^\\\|`\x00-\x20])*>
 ANON          "_a"[1-9][0-9]*
 INTEGER       [-+]?[0-9]+
-FLOAT         [-+]?[0-9]*\.[0-9]+
+FLOAT         [-+]?([0-9]*[.])?[0-9]+([eE][-+]?[0-9]+)?
 WHITESPACE    [ \r\t]+
 ENDLINE       [\n<<EOF>>]
 UNRECOGNIZED  .
